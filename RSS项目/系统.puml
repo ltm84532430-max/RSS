@@ -1,0 +1,543 @@
+@startuml AI_RSS_01_Architecture_Overview
+title AI增强RSS阅读器 - 01 总体架构一眼图
+
+left to right direction
+skinparam backgroundColor #F8FAFC
+skinparam shadowing false
+skinparam componentStyle rectangle
+skinparam defaultFontName Microsoft YaHei
+skinparam defaultTextAlignment center
+skinparam ArrowColor #334155
+skinparam ArrowThickness 1.4
+skinparam RectangleBorderColor #334155
+skinparam RectangleFontColor #0F172A
+skinparam ComponentBorderColor #334155
+skinparam ComponentFontColor #0F172A
+skinparam DatabaseBorderColor #0369A1
+skinparam DatabaseBackgroundColor #E0F2FE
+skinparam QueueBorderColor #B45309
+skinparam QueueBackgroundColor #FEF3C7
+skinparam NoteBackgroundColor #FFF7ED
+skinparam NoteBorderColor #F97316
+
+actor "用户" as User
+cloud "外部RSS源" as RSS #EFF6FF
+cloud "AI模型API\nOpenAI / DeepSeek / Ollama" as LLM #F5F3FF
+
+rectangle "A. React 前端" as FE #DCFCE7 {
+  component "左侧RSS管理" as FE_Source
+  component "中间文章流" as FE_Feed
+  component "右侧AI三层面板" as FE_AI
+}
+
+rectangle "B. FastAPI 后端" as API #DBEAFE {
+  component "RSS Sources API" as API_Source
+  component "Articles API" as API_Article
+  component "Analysis API" as API_Analysis
+  component "抓取/去重服务" as FetchServices
+  component "任务投递器" as Dispatcher
+}
+
+queue "C. Redis Queue\nCelery Broker" as Redis
+
+rectangle "D. Celery Worker" as Worker #FCE7F3 {
+  component "Structured Layer" as Structured
+  component "Cognitive Layer" as Cognitive
+  component "Decision Layer" as Decision
+}
+
+database "E. PostgreSQL" as DB {
+  component "rss_sources" as DB_Source
+  component "articles" as DB_Article
+  component "article_analysis\n三层JSONB结果" as DB_Analysis
+  component "reading_state / tags" as DB_State
+}
+
+User --> FE : 1. 使用系统
+FE --> API : 2. HTTP API
+API_Source --> FetchServices : 3. 定时/手动抓取
+FetchServices --> RSS : 4. 拉取Feed和正文
+FetchServices --> DB : 5. 新文章入库
+FetchServices --> Dispatcher : 6. 新文章触发分析
+API_Analysis --> Dispatcher : 6b. 手动重分析
+Dispatcher --> Redis : 7. 投递异步任务
+Redis --> Worker : 8. Celery消费
+Worker --> LLM : 9. 三层LLM调用
+Worker --> DB : 10. 写入structured/cognitive/decision
+API_Article --> DB : 查询文章列表
+API_Analysis --> DB : 查询分析状态和结果
+FE_AI --> API_Analysis : 展示三层结果
+
+legend right
+|= 颜色 |= 职责 |
+|<#DCFCE7> 绿色 | 用户界面 |
+|<#DBEAFE> 蓝色 | HTTP接口和同步业务 |
+|<#FEF3C7> 黄色 | 异步任务边界 |
+|<#FCE7F3> 粉色 | AI Worker |
+|<#E0F2FE> 浅蓝 | 持久化数据 |
+
+关键原则：
+FastAPI 不等待 AI 模型返回；
+AI 分析只通过 Redis + Celery 异步执行。
+endlegend
+
+@enduml
+
+@startuml AI_RSS_02_Ingestion_To_Queue
+title AI增强RSS阅读器 - 02 从RSS抓取到AI任务入队
+
+skinparam backgroundColor #F8FAFC
+skinparam shadowing false
+skinparam defaultFontName Microsoft YaHei
+skinparam ArrowColor #334155
+skinparam activity {
+  BackgroundColor #FFFFFF
+  BorderColor #334155
+  FontColor #0F172A
+  DiamondBackgroundColor #FEF3C7
+  DiamondBorderColor #B45309
+  StartColor #16A34A
+  EndColor #DC2626
+}
+
+start
+
+partition "触发层" #E0F2FE {
+  :1. APScheduler 定时触发\n或用户手动 POST /rss-sources/{id}/fetch;
+}
+
+partition "抓取层" #DBEAFE {
+  :2. 读取 enabled=true 的 rss_sources;
+  :3. feedparser 解析 RSS entries;
+  :4. trafilatura 提取正文 content;
+}
+
+partition "入库层" #DCFCE7 {
+  :5. 计算 url_hash / content_hash;
+  if (6. 是否重复?) then (重复)
+    :跳过文章;
+  else (新文章)
+    :7. INSERT articles;
+    :8. analysis_status = queued;
+  endif
+}
+
+partition "异步边界" #FEF3C7 {
+  :9. analysis_dispatcher.enqueue(article_id);
+  :10. Celery delay(analyze_article_task);
+  :11. Redis 保存任务;
+}
+
+stop
+
+note right
+抓取接口返回：
+- fetched_count
+- inserted_count
+- queued_analysis_count
+
+不返回AI分析结果。
+end note
+
+@enduml
+
+@startuml AI_RSS_03_AI_Three_Layers
+title AI增强RSS阅读器 - 03 三层AI分析输入输出
+
+left to right direction
+skinparam backgroundColor #F8FAFC
+skinparam shadowing false
+skinparam componentStyle rectangle
+skinparam defaultFontName Microsoft YaHei
+skinparam ArrowColor #334155
+skinparam ArrowThickness 1.4
+skinparam ComponentBorderColor #334155
+skinparam ComponentFontColor #0F172A
+skinparam NoteBackgroundColor #FFF7ED
+skinparam NoteBorderColor #F97316
+
+database "articles" as Articles #E0F2FE
+component "Celery Task\nanalyze_article_task(article_id)" as Task #FEF3C7
+
+component "1. Structured Layer\n\n输入：原文 + 元数据\n输出：structured_result\n\n- topics\n- entities\n- summary\n- key_facts\n- sentiment\n- importance_score\n- confidence" as L1 #DCFCE7
+
+component "2. Cognitive Layer\n\n输入：structured_result + 原文\n输出：cognitive_result\n\n- core_insight\n- drivers\n- trend_type\n- impact_scope\n- bias_risk\n- uncertainties" as L2 #DBEAFE
+
+component "3. Decision Layer\n\n输入：structured + cognitive + user_profile\n输出：decision_result\n\n- attention_required\n- priority_level\n- impact_direction\n- impact_strength\n- recommended_action\n- watchlist_tags" as L3 #FCE7F3
+
+database "article_analysis" as Analysis #E0F2FE {
+  component "structured_result JSONB" as SR
+  component "cognitive_result JSONB" as CR
+  component "decision_result JSONB" as DR
+  component "status / task_id / error" as META
+}
+
+Articles --> Task : 读取title/source/content
+Task --> L1
+L1 --> L2 : structured_result
+L2 --> L3 : cognitive_result
+L3 --> Analysis : UPSERT三层结果
+
+note bottom of Task
+状态流转：
+queued -> processing -> completed
+failed 时保留 error_message，并允许 reanalyze。
+end note
+
+@enduml
+
+@startuml AI_RSS_04_Backend_Modules
+title AI增强RSS阅读器 - 04 后端模块分层图
+
+top to bottom direction
+skinparam backgroundColor #F8FAFC
+skinparam shadowing false
+skinparam componentStyle rectangle
+skinparam defaultFontName Microsoft YaHei
+skinparam ArrowColor #334155
+skinparam PackageBorderColor #334155
+skinparam PackageBackgroundColor #FFFFFF
+skinparam ComponentBorderColor #334155
+skinparam ComponentFontColor #0F172A
+
+package "入口层" #DBEAFE {
+  component "main.py\nFastAPI app" as Main
+  component "scheduler.py\nAPScheduler抓取调度" as Scheduler
+}
+
+package "HTTP路由层 routers/" #E0F2FE {
+  component "rss.py\n/rss-sources" as RssRouter
+  component "articles.py\n/articles" as ArticleRouter
+  component "analysis.py\n/analysis" as AnalysisRouter
+}
+
+package "业务服务层 services/" #DCFCE7 {
+  component "rss_fetcher.py\nRSS解析" as Fetcher
+  component "content_extractor.py\n正文提取" as Extractor
+  component "deduplication.py\n去重和入库" as Dedup
+  component "analysis_dispatcher.py\n只负责投递任务" as Dispatcher
+}
+
+package "异步执行层 workers/" #FEF3C7 {
+  component "celery_app.py\nRedis连接和队列配置" as CeleryApp
+  component "tasks.py\nanalyze_article_task" as Tasks
+}
+
+package "AI领域层 ai/" #FCE7F3 {
+  component "pipeline.py\n三层编排" as Pipeline
+  component "structured_layer.py" as Structured
+  component "cognitive_layer.py" as Cognitive
+  component "decision_layer.py" as Decision
+  component "providers.py\n模型适配" as Providers
+  component "prompts/" as Prompts
+}
+
+package "数据层" #E0F2FE {
+  component "models/\nSQLAlchemy模型" as Models
+  component "schemas/\nPydantic DTO" as Schemas
+  database "PostgreSQL" as DB
+}
+
+Main --> RssRouter
+Main --> ArticleRouter
+Main --> AnalysisRouter
+Scheduler --> Fetcher
+RssRouter --> Fetcher
+ArticleRouter --> Models
+AnalysisRouter --> Dispatcher
+Fetcher --> Extractor
+Fetcher --> Dedup
+Dedup --> Models
+Dedup --> Dispatcher
+Dispatcher --> Tasks : delay(article_id)
+Tasks --> Pipeline
+Pipeline --> Structured
+Structured --> Cognitive
+Cognitive --> Decision
+Structured --> Providers
+Cognitive --> Providers
+Decision --> Providers
+Providers --> Prompts
+Models --> DB
+Schemas ..> RssRouter
+Schemas ..> ArticleRouter
+Schemas ..> AnalysisRouter
+CeleryApp ..> Tasks
+
+legend right
+实现约束：
+1. routers 不直接调用 LLM
+2. services 不执行AI分析，只投递任务
+3. workers/tasks.py 是AI异步入口
+4. ai/pipeline.py 负责编排三层
+endlegend
+
+@enduml
+
+@startuml AI_RSS_05_Data_Model
+title AI增强RSS阅读器 - 05 数据模型与三层结果存储
+
+skinparam backgroundColor #F8FAFC
+skinparam shadowing false
+skinparam defaultFontName Microsoft YaHei
+skinparam class {
+  BackgroundColor #FFFFFF
+  BorderColor #334155
+  FontColor #0F172A
+  AttributeFontColor #334155
+}
+hide methods
+hide circle
+
+class rss_sources #E0F2FE {
+  +id: SERIAL <<PK>>
+  --
+  name: VARCHAR(255)
+  url: TEXT <<UNIQUE>>
+  category: VARCHAR(100)
+  enabled: BOOLEAN
+  fetch_interval_minutes: INT
+  last_fetch_time: TIMESTAMP
+  created_at: TIMESTAMP
+  updated_at: TIMESTAMP
+}
+
+class articles #DCFCE7 {
+  +id: SERIAL <<PK>>
+  --
+  source_id: INT <<FK>>
+  title: TEXT
+  url: TEXT <<UNIQUE>>
+  author: VARCHAR(255)
+  published_at: TIMESTAMP
+  summary: TEXT
+  content: TEXT
+  url_hash: VARCHAR(64)
+  content_hash: VARCHAR(64)
+  language: VARCHAR(20)
+  analysis_status: VARCHAR(30)
+  created_at: TIMESTAMP
+}
+
+class article_analysis #FCE7F3 {
+  +id: SERIAL <<PK>>
+  --
+  article_id: INT <<FK, UNIQUE>>
+  structured_result: JSONB <<Required>>
+  cognitive_result: JSONB <<Required>>
+  decision_result: JSONB <<Required>>
+  status: VARCHAR(30)
+  error_message: TEXT
+  model_provider: VARCHAR(50)
+  model_name: VARCHAR(100)
+  task_id: VARCHAR(255)
+  analyzed_at: TIMESTAMP
+  updated_at: TIMESTAMP
+}
+
+class user_reading_state #FEF3C7 {
+  +id: SERIAL <<PK>>
+  --
+  article_id: INT <<FK>>
+  is_read: BOOLEAN
+  is_saved: BOOLEAN
+  is_archived: BOOLEAN
+  read_at: TIMESTAMP
+  created_at: TIMESTAMP
+}
+
+class tags #F1F5F9 {
+  +id: SERIAL <<PK>>
+  --
+  name: VARCHAR(100) <<UNIQUE>>
+}
+
+class article_tags #F1F5F9 {
+  +article_id: INT <<PK, FK>>
+  +tag_id: INT <<PK, FK>>
+}
+
+rss_sources "1" --> "0..*" articles : owns
+articles "1" --> "0..1" article_analysis : async AI result
+articles "1" --> "0..1" user_reading_state : read/save/archive
+articles "1" --> "0..*" article_tags
+tags "1" --> "0..*" article_tags
+
+note right of article_analysis
+这是AI结果唯一落点：
+- structured_result
+- cognitive_result
+- decision_result
+
+前端右侧三层面板直接读取这三个字段。
+end note
+
+@enduml
+
+@startuml AI_RSS_06_Frontend_Layout
+title AI增强RSS阅读器 - 06 前端三栏页面结构
+
+left to right direction
+skinparam backgroundColor #F8FAFC
+skinparam shadowing false
+skinparam componentStyle rectangle
+skinparam defaultFontName Microsoft YaHei
+skinparam ArrowColor #334155
+skinparam RectangleBorderColor #334155
+skinparam RectangleFontColor #0F172A
+skinparam ComponentBorderColor #334155
+skinparam ComponentFontColor #0F172A
+
+actor "用户" as User
+
+rectangle "左侧：RSS管理\n宽度约 260px" as Left #E0F2FE {
+  component "源列表" as SourceList
+  component "分类筛选" as CategoryFilter
+  component "添加/禁用/删除RSS源" as SourceActions
+  component "手动抓取按钮" as FetchButton
+}
+
+rectangle "中间：文章流\n主工作区" as Center #DCFCE7 {
+  component "搜索与筛选条" as SearchBar
+  component "文章卡片列表" as Cards
+  component "分析状态标记\nqueued/processing/completed/failed" as StatusBadge
+  component "优先级和推荐动作" as PriorityBadge
+}
+
+rectangle "右侧：AI三层展示\n宽度约 360-420px" as Right #FCE7F3 {
+  component "Structured\n摘要/实体/事实/评分" as StructuredView
+  component "Cognitive\n洞察/趋势/影响/不确定性" as CognitiveView
+  component "Decision\n优先级/行动/追踪标签" as DecisionView
+  component "重分析按钮" as ReanalyzeButton
+}
+
+User --> Left : 管理RSS源
+User --> Center : 选择文章
+Center --> Right : 当前article_id
+Right --> Center : 更新分析状态和优先级
+
+note bottom of Right
+右侧不是普通摘要面板，
+必须固定展示三层AI结果。
+如果 analysis_status 不是 completed，
+显示加载、失败或重试状态。
+end note
+
+@enduml
+
+@startuml AI_RSS_07_API_Contract
+title AI增强RSS阅读器 - 07 API设计变化
+
+skinparam backgroundColor #F8FAFC
+skinparam shadowing false
+skinparam defaultFontName Microsoft YaHei
+skinparam componentStyle rectangle
+skinparam RectangleBorderColor #334155
+skinparam RectangleFontColor #0F172A
+skinparam NoteBackgroundColor #FFFFFF
+skinparam NoteBorderColor #334155
+
+rectangle "RSS Sources API" as RSS #E0F2FE
+rectangle "Articles API" as Articles #DCFCE7
+rectangle "Analysis API" as Analysis #FCE7F3
+queue "Redis Queue" as Redis #FEF3C7
+database "PostgreSQL" as DB #E0F2FE
+
+RSS --> DB : CRUD rss_sources
+RSS --> Redis : fetch后投递新文章分析任务
+Articles --> DB : 读文章和阅读状态
+Analysis --> DB : 读三层分析结果
+Analysis --> Redis : reanalyze投递任务
+
+note right of RSS
+GET    /api/rss-sources
+POST   /api/rss-sources
+PUT    /api/rss-sources/{id}
+DELETE /api/rss-sources/{id}
+
+POST   /api/rss-sources/{id}/fetch
+返回：
+{
+  fetched_count,
+  inserted_count,
+  queued_analysis_count
+}
+end note
+
+note right of Articles
+GET  /api/articles
+列表字段增加：
+- analysis_status
+- priority_level
+- recommended_action
+- sentiment
+
+GET  /api/articles/{id}
+POST /api/articles/{id}/save
+POST /api/articles/{id}/archive
+end note
+
+note right of Analysis
+GET  /api/articles/{id}/analysis
+返回：
+{
+  status,
+  structured_result,
+  cognitive_result,
+  decision_result
+}
+
+GET  /api/articles/{id}/analysis/status
+
+POST /api/articles/{id}/reanalyze
+返回：202 Accepted
+{
+  task_id,
+  status: "queued"
+}
+end note
+
+@enduml
+
+@startuml AI_RSS_08_Analysis_Status_State
+title AI增强RSS阅读器 - 08 AI分析状态机
+
+skinparam backgroundColor #F8FAFC
+skinparam shadowing false
+skinparam defaultFontName Microsoft YaHei
+skinparam state {
+  BackgroundColor #FFFFFF
+  BorderColor #334155
+  FontColor #0F172A
+  StartColor #16A34A
+  EndColor #DC2626
+}
+
+state queued #FEF3C7
+state processing #DBEAFE
+state completed #DCFCE7
+state failed #FEE2E2
+
+[*] --> queued : 文章入库\n或用户reanalyze
+queued --> processing : Celery Worker领取任务
+processing --> completed : 三层JSON全部写入
+processing --> failed : 任一层失败/JSON无效/模型错误
+failed --> queued : 用户重试reanalyze
+completed --> queued : 强制重分析force=true
+completed --> [*]
+
+note right of completed
+completed 必须满足：
+structured_result 非空
+cognitive_result 非空
+decision_result 非空
+end note
+
+note right of failed
+failed 必须保存：
+error_message
+task_id
+updated_at
+end note
+
+@enduml
