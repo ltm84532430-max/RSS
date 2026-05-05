@@ -21,6 +21,8 @@ def current_model_name() -> str:
         return settings.ai_model_name
     if settings.ai_model_provider == "deepseek":
         return "deepseek-chat"
+    if settings.ai_model_provider == "xiaomi":
+        return "mimo-v2-flash"
     return "gpt-4o-mini"
 
 
@@ -35,18 +37,66 @@ def call_json_model(
         raise AIProviderError("Live provider requested while AI_PIPELINE_MODE=mock.")
 
     provider = settings.ai_model_provider.lower()
-    if provider == "openai":
-        raw = _call_openai_chat_json(system_prompt=system_prompt, user_prompt=user_prompt)
-    elif provider == "deepseek":
-        raw = _call_deepseek_chat_json(system_prompt=system_prompt, user_prompt=user_prompt)
-    else:
-        raise AIProviderError(f"Unsupported AI provider: {settings.ai_model_provider}")
+    raw = _call_provider(
+        provider=provider,
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+    )
 
     try:
         parsed = response_model.model_validate(raw)
     except ValidationError as exc:
-        raise AIProviderError(f"Model JSON validation failed: {exc}") from exc
+        repaired_raw = _repair_json_to_schema(
+            provider=provider,
+            raw=raw,
+            validation_error=str(exc),
+            response_model=response_model,
+        )
+        try:
+            parsed = response_model.model_validate(repaired_raw)
+        except ValidationError as repair_exc:
+            raise AIProviderError(
+                f"Model JSON validation failed after repair attempt: {repair_exc}"
+            ) from repair_exc
     return parsed.model_dump()
+
+
+def _call_provider(*, provider: str, system_prompt: str, user_prompt: str) -> dict[str, Any]:
+    if provider == "openai":
+        return _call_openai_chat_json(system_prompt=system_prompt, user_prompt=user_prompt)
+    if provider == "deepseek":
+        return _call_deepseek_chat_json(system_prompt=system_prompt, user_prompt=user_prompt)
+    if provider == "xiaomi":
+        return _call_xiaomi_chat_json(system_prompt=system_prompt, user_prompt=user_prompt)
+    raise AIProviderError(f"Unsupported AI provider: {provider}")
+
+
+def _repair_json_to_schema(
+    *,
+    provider: str,
+    raw: dict[str, Any],
+    validation_error: str,
+    response_model: type[BaseModel],
+) -> dict[str, Any]:
+    schema_json = json.dumps(response_model.model_json_schema(), ensure_ascii=True)
+    raw_json = json.dumps(raw, ensure_ascii=True)
+    system_prompt = (
+        "You are a JSON repair assistant. "
+        "Return valid JSON only. "
+        "Fix the object so it strictly matches the provided JSON schema. "
+        "Do not add markdown, code fences, or explanations."
+    )
+    user_prompt = (
+        "Repair this JSON object to satisfy the target schema.\n\n"
+        f"TARGET_JSON_SCHEMA:\n{schema_json}\n\n"
+        f"VALIDATION_ERROR:\n{validation_error}\n\n"
+        f"INVALID_JSON_OBJECT:\n{raw_json}"
+    )
+    return _call_provider(
+        provider=provider,
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+    )
 
 
 def _call_openai_chat_json(*, system_prompt: str, user_prompt: str) -> dict[str, Any]:
@@ -94,6 +144,34 @@ def _call_deepseek_chat_json(*, system_prompt: str, user_prompt: str) -> dict[st
     }
     return _post_json(
         url="https://api.deepseek.com/chat/completions",
+        headers=headers,
+        payload=payload,
+    )
+
+
+def _call_xiaomi_chat_json(*, system_prompt: str, user_prompt: str) -> dict[str, Any]:
+    settings = get_settings()
+    if not settings.xiaomi_api_key:
+        raise AIProviderError("XIAOMI_API_KEY is not configured.")
+
+    payload = {
+        "model": current_model_name(),
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        "max_completion_tokens": 2048,
+        "temperature": 0.2,
+        "top_p": 0.95,
+        "stream": False,
+        "thinking": {"type": "disabled"},
+    }
+    headers = {
+        "api-key": settings.xiaomi_api_key,
+        "Content-Type": "application/json",
+    }
+    return _post_json(
+        url="https://api.xiaomimimo.com/v1/chat/completions",
         headers=headers,
         payload=payload,
     )

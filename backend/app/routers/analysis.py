@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.schemas.analysis import AnalysisRead, AnalysisStatusRead, ReanalyzeResponse
+from app.schemas.analysis import AnalyzeResponse, AnalysisRead, AnalysisStatusRead, ReanalyzeResponse
 from app.services import analysis as analysis_service
 from app.services import articles as articles_service
 
@@ -35,6 +35,21 @@ def get_article_analysis_status(
 
 
 @router.post(
+    "/{article_id}/analyze",
+    response_model=AnalyzeResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def analyze_article(
+    article_id: int,
+    db: Annotated[Session, Depends(get_db)],
+) -> AnalyzeResponse:
+    article = articles_service.get_article(db, article_id)
+    if article is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Article not found.")
+    return analysis_service.enqueue_analysis(db, article)
+
+
+@router.post(
     "/{article_id}/reanalyze",
     response_model=ReanalyzeResponse,
     status_code=status.HTTP_202_ACCEPTED,
@@ -47,4 +62,3 @@ def reanalyze_article(
     if article is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Article not found.")
     return analysis_service.enqueue_reanalysis(db, article)
-

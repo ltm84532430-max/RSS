@@ -7,10 +7,8 @@ import re
 import feedparser
 from sqlalchemy.orm import Session
 
-from app.models.analysis import ArticleAnalysis
 from app.models.article import Article
 from app.models.rss_source import RssSource
-from app.services.analysis_dispatcher import enqueue_article_analysis
 from app.services.content_extractor import extract_article_content
 from app.services.deduplication import article_exists, content_hash, url_hash
 
@@ -40,8 +38,6 @@ def fetch_source(db: Session, source: RssSource) -> FetchResult:
         )
 
     inserted_count = 0
-    queued_analysis_count = 0
-
     for entry in entries:
         link = _entry_link(entry)
         title = _clean_text(_entry_value(entry, "title")) or "(untitled)"
@@ -72,21 +68,10 @@ def fetch_source(db: Session, source: RssSource) -> FetchResult:
             url_hash=article_url_hash,
             content_hash=article_content_hash,
             language=_entry_value(feed.feed, "language"),
-            analysis_status="queued",
+            analysis_status="pending",
         )
         db.add(article)
-        db.flush()
-
-        task_id = enqueue_article_analysis(article.id)
-        db.add(
-            ArticleAnalysis(
-                article_id=article.id,
-                status="queued",
-                task_id=task_id,
-            )
-        )
         inserted_count += 1
-        queued_analysis_count += 1
 
     source.last_fetch_time = datetime.now(UTC)
     db.commit()
@@ -95,9 +80,9 @@ def fetch_source(db: Session, source: RssSource) -> FetchResult:
         source_id=source.id,
         fetched_count=len(entries),
         inserted_count=inserted_count,
-        queued_analysis_count=queued_analysis_count,
+        queued_analysis_count=0,
         status="ok",
-        message="RSS feed fetched and new articles queued for analysis.",
+        message="RSS feed fetched and new articles stored with pending analysis.",
     )
 
 

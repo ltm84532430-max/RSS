@@ -55,6 +55,7 @@ def process_analysis_by_id(db: Session, analysis_id: int) -> ArticleAnalysis:
 
     structured = result.structured_result
     decision = result.decision_result
+    recommended_action = _normalize_recommended_action(decision.get("recommended_action"))
 
     analysis.structured_result = structured
     analysis.cognitive_result = result.cognitive_result
@@ -64,7 +65,7 @@ def process_analysis_by_id(db: Session, analysis_id: int) -> ArticleAnalysis:
     analysis.model_provider = current_provider_name()
     analysis.model_name = current_model_name()
     analysis.priority_level = decision.get("priority_level")
-    analysis.recommended_action = decision.get("recommended_action")
+    analysis.recommended_action = recommended_action
     analysis.sentiment = structured.get("sentiment")
     analysis.importance_score = structured.get("importance_score")
     analysis.analyzed_at = now
@@ -90,3 +91,26 @@ def mark_analysis_failed(db: Session, analysis_id: int, message: str) -> None:
     if analysis.article is not None:
         analysis.article.analysis_status = "failed"
     db.commit()
+
+
+def _normalize_recommended_action(value: object) -> str | None:
+    if value is None:
+        return None
+    normalized = str(value).strip().lower()
+    if not normalized:
+        return None
+
+    if normalized in {"alert", "track", "read", "ignore", "save"}:
+        return normalized
+
+    if any(token in normalized for token in ("urgent", "immediate", "alert", "hedg")):
+        return "alert"
+    if any(token in normalized for token in ("track", "monitor", "watch", "follow")):
+        return "track"
+    if any(token in normalized for token in ("save", "bookmark", "keep")):
+        return "save"
+    if any(token in normalized for token in ("ignore", "skip", "low priority", "no action")):
+        return "ignore"
+    if any(token in normalized for token in ("read", "review", "analyze", "assess")):
+        return "read"
+    return "read"

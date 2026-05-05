@@ -35,3 +35,8 @@ class ReanalyzeResponse(BaseModel):
     task_id: str
     status: str
 
+
+class AnalyzeResponse(BaseModel):
+    article_id: int
+    task_id: str
+    status: str

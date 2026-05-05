@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.models.analysis import ArticleAnalysis
 from app.models.article import Article
-from app.schemas.analysis import AnalysisRead, AnalysisStatusRead, ReanalyzeResponse
+from app.schemas.analysis import AnalyzeResponse, AnalysisRead, AnalysisStatusRead, ReanalyzeResponse
 from app.services.analysis_dispatcher import enqueue_article_analysis
 
 
@@ -51,7 +51,7 @@ def get_analysis_status(db: Session, article: Article) -> AnalysisStatusRead:
     )
 
 
-def enqueue_reanalysis(db: Session, article: Article) -> ReanalyzeResponse:
+def enqueue_analysis(db: Session, article: Article) -> AnalyzeResponse:
     task_id = enqueue_article_analysis(article.id)
     now = datetime.now(UTC)
     analysis = _get_analysis_row(db, article.id)
@@ -62,11 +62,30 @@ def enqueue_reanalysis(db: Session, article: Article) -> ReanalyzeResponse:
     analysis.status = "queued"
     analysis.task_id = task_id
     analysis.error_message = None
+    analysis.structured_result = None
+    analysis.cognitive_result = None
+    analysis.decision_result = None
+    analysis.model_provider = None
+    analysis.model_name = None
+    analysis.priority_level = None
+    analysis.recommended_action = None
+    analysis.sentiment = None
+    analysis.importance_score = None
+    analysis.analyzed_at = None
     analysis.updated_at = now
     article.analysis_status = "queued"
 
     db.commit()
-    return ReanalyzeResponse(article_id=article.id, task_id=task_id, status="queued")
+    return AnalyzeResponse(article_id=article.id, task_id=task_id, status="queued")
+
+
+def enqueue_reanalysis(db: Session, article: Article) -> ReanalyzeResponse:
+    response = enqueue_analysis(db, article)
+    return ReanalyzeResponse(
+        article_id=response.article_id,
+        task_id=response.task_id,
+        status=response.status,
+    )
 
 
 def _get_analysis_row(db: Session, article_id: int) -> ArticleAnalysis | None:

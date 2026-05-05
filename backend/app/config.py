@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     openai_api_key: str = ""
     deepseek_api_key: str = ""
+    xiaomi_api_key: str = ""
     ai_model_provider: str = "openai"
     ai_model_name: str = ""
     ai_pipeline_mode: str = "mock"
