@@ -5,24 +5,31 @@ import {
   BrainCircuit,
   ExternalLink,
   FileText,
+  Hash,
   Minus,
   Plus,
   RefreshCcw,
+  X,
 } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button, buttonVariants } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Separator } from '@/components/ui/separator'
 import { cn } from '@/lib/utils'
-import type { AnalysisRead, ArticleDetail } from '@/types/api'
+import type { AnalysisRead, ArticleDetail, TagRead } from '@/types/api'
 
 type AnalysisPanelProps = {
   article: ArticleDetail
   sourceName: string | null | undefined
   analysis: AnalysisRead
+  availableTags: TagRead[]
   loading: boolean
   busy: boolean
+  tagBusy: boolean
   onAnalyze: () => void
+  onAddTag: (name: string) => void
+  onRemoveTag: (tagId: number) => void
 }
 
 type PanelTab = 'read' | 'ai'
@@ -31,12 +38,17 @@ export function AnalysisPanel({
   article,
   sourceName,
   analysis,
+  availableTags,
   loading,
   busy,
+  tagBusy,
   onAnalyze,
+  onAddTag,
+  onRemoveTag,
 }: AnalysisPanelProps) {
   const [tab, setTab] = useState<PanelTab>('read')
   const [fontScale, setFontScale] = useState(16)
+  const [draftTag, setDraftTag] = useState('')
 
   const actionLabel = useMemo(() => {
     if (analysis.status === 'completed' || analysis.status === 'failed') {
@@ -49,6 +61,15 @@ export function AnalysisPanel({
   }, [analysis.status])
 
   const actionDisabled = busy || analysis.status === 'queued' || analysis.status === 'processing'
+
+  function submitTag() {
+    const value = draftTag.trim()
+    if (!value) {
+      return
+    }
+    onAddTag(value)
+    setDraftTag('')
+  }
 
   return (
     <div className="flex h-full flex-col">
@@ -118,6 +139,63 @@ export function AnalysisPanel({
               ) : null}
             </div>
             <h3 className="text-2xl font-semibold leading-8 text-slate-950">{article.title}</h3>
+            <section className="mt-5 rounded-lg border border-slate-200 bg-slate-50 p-4">
+              <div className="flex items-center gap-2 text-sm font-semibold text-slate-950">
+                <Hash className="size-4 text-blue-600" />
+                Tags
+              </div>
+              <p className="mt-1 text-sm text-slate-500">
+                Manual classification for this article. Tags stay with the article record.
+              </p>
+
+              <div className="mt-4 flex flex-wrap gap-2">
+                {article.tags.length > 0 ? (
+                  article.tags.map((tag) => (
+                    <span
+                      key={tag.id}
+                      className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700"
+                    >
+                      {tag.name}
+                      <button
+                        type="button"
+                        className="rounded-sm p-0.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700"
+                        onClick={() => onRemoveTag(tag.id)}
+                        disabled={tagBusy}
+                      >
+                        <X className="size-3" />
+                      </button>
+                    </span>
+                  ))
+                ) : (
+                  <div className="text-sm text-slate-500">No tags yet.</div>
+                )}
+              </div>
+
+              <div className="mt-4 flex gap-2">
+                <Input
+                  value={draftTag}
+                  onChange={(event) => setDraftTag(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault()
+                      submitTag()
+                    }
+                  }}
+                  placeholder="Add a tag, for example macro or fed"
+                  className="h-9"
+                  list="article-tag-suggestions"
+                  disabled={tagBusy}
+                />
+                <datalist id="article-tag-suggestions">
+                  {availableTags.map((tag) => (
+                    <option key={tag.id} value={tag.name} />
+                  ))}
+                </datalist>
+                <Button variant="outline" size="sm" onClick={submitTag} disabled={tagBusy || !draftTag.trim()}>
+                  Add tag
+                </Button>
+              </div>
+            </section>
             {article.summary ? (
               <p className="mt-4 text-base leading-7 text-slate-600">{article.summary}</p>
             ) : null}

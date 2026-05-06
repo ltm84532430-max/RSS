@@ -5,7 +5,9 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.schemas.article import ArticleDetail, ArticleListResponse, ArticleStateResponse
+from app.schemas.tag import TagCreate
 from app.services import articles
+from app.services import tags as tags_service
 
 
 router = APIRouter(prefix="/api/articles", tags=["Articles"])
@@ -69,3 +71,30 @@ def archive_article(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Article not found.")
     return articles.set_archived(db, article_id, True)
 
+
+@router.post("/{article_id}/tags", response_model=ArticleDetail)
+def add_article_tag(
+    article_id: int,
+    payload: TagCreate,
+    db: Annotated[Session, Depends(get_db)],
+) -> ArticleDetail:
+    try:
+        article = tags_service.add_tag_to_article(db, article_id, payload.name)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    if article is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Article not found.")
+    return article
+
+
+@router.delete("/{article_id}/tags/{tag_id}", response_model=ArticleDetail)
+def remove_article_tag(
+    article_id: int,
+    tag_id: int,
+    db: Annotated[Session, Depends(get_db)],
+) -> ArticleDetail:
+    article = tags_service.remove_tag_from_article(db, article_id, tag_id)
+    if article is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Article not found.")
+    return article

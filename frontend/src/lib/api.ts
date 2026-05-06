@@ -8,6 +8,8 @@ import type {
   RssSourceFetchResponse,
   RssSourceRead,
   RssSourceUpdate,
+  TagCreate,
+  TagRead,
 } from '@/types/api'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8000'
@@ -108,6 +110,30 @@ export function saveArticle(articleId: number) {
 export function archiveArticle(articleId: number) {
   return request(`/api/articles/${articleId}/archive`, {
     method: 'POST',
+  })
+}
+
+export function fetchTags() {
+  return request<TagRead[]>('/api/tags')
+}
+
+export function createTag(payload: TagCreate) {
+  return request<TagRead>('/api/tags', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function addArticleTag(articleId: number, payload: TagCreate) {
+  return request<ArticleDetail>(`/api/articles/${articleId}/tags`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function removeArticleTag(articleId: number, tagId: number) {
+  return request<ArticleDetail>(`/api/articles/${articleId}/tags/${tagId}`, {
+    method: 'DELETE',
   })
 }
 

@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routers import analysis, articles, rss
+from app.routers import analysis, articles, rss, tags
 
 
 app = FastAPI(
@@ -21,9 +21,9 @@ app.add_middleware(
 app.include_router(rss.router)
 app.include_router(articles.router)
 app.include_router(analysis.router)
+app.include_router(tags.router)
 
 
 @app.get("/health", tags=["System"])
 def health_check() -> dict[str, str]:
     return {"status": "ok"}
-

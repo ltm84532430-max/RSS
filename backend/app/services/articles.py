@@ -13,6 +13,7 @@ from app.schemas.article import (
     ArticleStateResponse,
     ReadingStateRead,
 )
+from app.schemas.tag import TagRead
 
 
 def get_article(db: Session, article_id: int) -> Article | None:
@@ -185,7 +186,11 @@ def _to_detail(article: Article) -> ArticleDetail:
         **base,
         content=article.content,
         source=article.source,
-        tags=[article_tag.tag.name for article_tag in article.tags if article_tag.tag],
+        tags=[
+            TagRead.model_validate(article_tag.tag)
+            for article_tag in article.tags
+            if article_tag.tag
+        ],
     )
 
 
@@ -197,4 +202,3 @@ def _to_state_response(state: UserReadingState) -> ArticleStateResponse:
         is_archived=state.is_archived,
         read_at=state.read_at,
     )
-

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { BrainCircuit, Newspaper, RefreshCcw, Rss } from 'lucide-react'
 
 import { AnalysisPanel } from '@/components/analysis-panel'
@@ -9,6 +9,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import {
   analyzeArticle,
   archiveArticle,
+  addArticleTag,
   createSource,
   deleteSource,
   fetchAnalysis,
@@ -16,7 +17,9 @@ import {
   fetchArticles,
   fetchRssSource,
   fetchSources,
+  fetchTags,
   reanalyzeArticle,
+  removeArticleTag,
   saveArticle,
   updateSource,
 } from '@/lib/api'
@@ -27,6 +30,7 @@ import type {
   ArticleListResponse,
   RssSourceCreate,
   RssSourceRead,
+  TagRead,
 } from '@/types/api'
 
 const POLLING_STATUSES = new Set(['queued', 'processing'])
@@ -39,6 +43,7 @@ function App() {
   const [selectedArticleId, setSelectedArticleId] = useState<number | null>(null)
   const [selectedArticleDetail, setSelectedArticleDetail] = useState<ArticleDetail | null>(null)
   const [selectedAnalysis, setSelectedAnalysis] = useState<AnalysisRead | null>(null)
+  const [availableTags, setAvailableTags] = useState<TagRead[]>([])
   const [search, setSearch] = useState('')
   const [articleFilters, setArticleFilters] = useState<ArticleFilters>({
     analysisStatus: 'all',
@@ -51,7 +56,13 @@ function App() {
   const [analysisLoading, setAnalysisLoading] = useState(false)
   const [refreshingArticleId, setRefreshingArticleId] = useState<number | null>(null)
   const [sourceBusyId, setSourceBusyId] = useState<number | null>(null)
+  const [tagBusy, setTagBusy] = useState(false)
   const [actionMessage, setActionMessage] = useState<string | null>(null)
+  const selectedArticleIdRef = useRef<number | null>(null)
+
+  useEffect(() => {
+    selectedArticleIdRef.current = selectedArticleId
+  }, [selectedArticleId])
 
   const sourceNameById = useMemo(
     () => new Map(sources.map((source) => [source.id, source.name])),
@@ -70,6 +81,11 @@ function App() {
       setSourcesLoading(false)
     }
   }, [selectedSourceId])
+
+  const loadTags = useCallback(async () => {
+    const tags = await fetchTags()
+    setAvailableTags(tags)
+  }, [])
 
   const loadArticles = useCallback(
     async (options?: { silent?: boolean }) => {
@@ -117,12 +133,10 @@ function App() {
 
   const loadArticleDetail = useCallback(async (articleId: number) => {
     const detail = await fetchArticleDetail(articleId)
-    setSelectedArticleDetail((current) => {
-      if (current && current.id !== articleId) {
-        return current
-      }
-      return detail
-    })
+    if (selectedArticleIdRef.current !== articleId) {
+      return
+    }
+    setSelectedArticleDetail(detail)
   }, [])
 
   const loadAnalysis = useCallback(
@@ -133,24 +147,26 @@ function App() {
 
       try {
         const analysis = await fetchAnalysis(articleId)
-        setSelectedAnalysis((current) => {
-          if (selectedArticleId !== articleId) {
-            return current
-          }
-          return analysis
-        })
+        if (selectedArticleIdRef.current !== articleId) {
+          return
+        }
+        setSelectedAnalysis(analysis)
       } finally {
         if (!options?.silent) {
           setAnalysisLoading(false)
         }
       }
     },
-    [selectedArticleId],
+    [],
   )
 
   useEffect(() => {
     void loadSources()
   }, [loadSources])
+
+  useEffect(() => {
+    void loadTags()
+  }, [loadTags])
 
   useEffect(() => {
     void loadArticles()
@@ -159,6 +175,7 @@ function App() {
   useEffect(() => {
     if (!selectedArticleId) {
       setSelectedArticleDetail(null)
+      setSelectedAnalysis(null)
       return
     }
     void loadArticleDetail(selectedArticleId)
@@ -239,7 +256,7 @@ function App() {
     try {
       const result = await fetchRssSource(sourceId)
       setActionMessage(
-        `Fetched ${result.fetched_count} items, inserted ${result.inserted_count}, auto-queued ${result.queued_analysis_count}.`,
+        `Fetched ${result.fetched_count} items, inserted ${result.inserted_count}. New articles are pending manual analysis.`,
       )
       await Promise.all([loadSources(), loadArticles()])
     } catch (error) {
@@ -292,6 +309,35 @@ function App() {
       await Promise.all([loadArticles({ silent: true }), loadArticleDetail(articleId)])
     } catch (error) {
       setActionMessage(getErrorMessage(error))
+    }
+  }
+
+  async function handleAddTag(articleId: number, name: string) {
+    setTagBusy(true)
+    setActionMessage(`Adding tag: ${name}`)
+    try {
+      const detail = await addArticleTag(articleId, { name })
+      setSelectedArticleDetail(detail)
+      await loadTags()
+      setActionMessage(`Tag added: ${name}`)
+    } catch (error) {
+      setActionMessage(getErrorMessage(error))
+    } finally {
+      setTagBusy(false)
+    }
+  }
+
+  async function handleRemoveTag(articleId: number, tagId: number) {
+    setTagBusy(true)
+    setActionMessage('Removing tag...')
+    try {
+      const detail = await removeArticleTag(articleId, tagId)
+      setSelectedArticleDetail(detail)
+      setActionMessage('Tag removed.')
+    } catch (error) {
+      setActionMessage(getErrorMessage(error))
+    } finally {
+      setTagBusy(false)
     }
   }
 
@@ -383,9 +429,13 @@ function App() {
                 article={selectedArticle}
                 sourceName={selectedArticle.source_id ? sourceNameById.get(selectedArticle.source_id) : null}
                 analysis={selectedAnalysis}
+                availableTags={availableTags}
                 loading={analysisLoading}
                 busy={refreshingArticleId === selectedArticle.id}
+                tagBusy={tagBusy}
                 onAnalyze={() => void handleAnalyze(selectedArticle.id)}
+                onAddTag={(name) => void handleAddTag(selectedArticle.id, name)}
+                onRemoveTag={(tagId) => void handleRemoveTag(selectedArticle.id, tagId)}
               />
             ) : (
               <div className="flex h-full min-h-[420px] items-center justify-center p-6 text-center text-sm text-slate-500">

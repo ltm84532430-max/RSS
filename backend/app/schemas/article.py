@@ -1,8 +1,9 @@
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.schemas.rss_source import RssSourceRead
+from app.schemas.tag import TagRead
 
 
 class AnalysisSummary(BaseModel):
@@ -47,7 +48,7 @@ class ArticleListResponse(BaseModel):
 class ArticleDetail(ArticleListItem):
     content: str | None
     source: RssSourceRead | None = None
-    tags: list[str] = []
+    tags: list[TagRead] = Field(default_factory=list)
 
 
 class ArticleStateResponse(BaseModel):
@@ -56,4 +57,3 @@ class ArticleStateResponse(BaseModel):
     is_saved: bool
     is_archived: bool
     read_at: datetime | None
-

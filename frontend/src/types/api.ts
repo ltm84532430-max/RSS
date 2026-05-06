@@ -68,7 +68,7 @@ export type ArticleListItem = {
 export type ArticleDetail = ArticleListItem & {
   content: string | null
   source?: RssSourceRead | null
-  tags: string[]
+  tags: TagRead[]
 }
 
 export type ArticleListResponse = {
@@ -106,4 +106,13 @@ export type AnalyzeResponse = {
   article_id: number
   task_id: string
   status: string
+}
+
+export type TagRead = {
+  id: number
+  name: string
+}
+
+export type TagCreate = {
+  name: string
 }
