@@ -134,11 +134,7 @@ export function ArticleFeed({
                       : 'border-slate-200 bg-white hover:border-slate-300',
                   )}
                 >
-                  <button
-                    type="button"
-                    onClick={() => onSelectArticle(article.id)}
-                    className="w-full text-left"
-                  >
+                  <button type="button" onClick={() => onSelectArticle(article.id)} className="w-full text-left">
                     <div className="flex items-start justify-between gap-4">
                       <div className="min-w-0">
                         <h3 className="line-clamp-2 text-base font-semibold text-slate-950">

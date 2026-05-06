@@ -182,10 +182,8 @@ export function SourceSidebar({
             const busy = busySourceId === source.id
 
             return (
-              <button
+              <div
                 key={source.id}
-                type="button"
-                onClick={() => onSelectSource(source.id)}
                 className={cn(
                   'rounded-lg border px-3 py-3 text-left transition-colors',
                   active
@@ -193,30 +191,32 @@ export function SourceSidebar({
                     : 'border-transparent bg-white hover:border-slate-200 hover:bg-slate-50',
                 )}
               >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="truncate text-sm font-medium text-slate-950">{source.name}</div>
-                    <div className="mt-1 truncate text-xs text-slate-500">{source.url}</div>
+                <button type="button" onClick={() => onSelectSource(source.id)} className="w-full text-left">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-medium text-slate-950">{source.name}</div>
+                      <div className="mt-1 truncate text-xs text-slate-500">{source.url}</div>
+                    </div>
+                    <span
+                      className={cn(
+                        'mt-0.5 shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium',
+                        source.enabled ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500',
+                      )}
+                    >
+                      {source.enabled ? 'Enabled' : 'Disabled'}
+                    </span>
                   </div>
-                  <span
-                    className={cn(
-                      'mt-0.5 shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium',
-                      source.enabled ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500',
-                    )}
-                  >
-                    {source.enabled ? 'Enabled' : 'Disabled'}
-                  </span>
-                </div>
 
-                <div className="mt-2 flex items-center justify-between gap-2 text-xs text-slate-500">
-                  <div className="flex items-center gap-1.5">
-                    <Clock3 className="size-3.5" />
-                    <span>{source.fetch_interval_minutes} min</span>
+                  <div className="mt-2 flex items-center justify-between gap-2 text-xs text-slate-500">
+                    <div className="flex items-center gap-1.5">
+                      <Clock3 className="size-3.5" />
+                      <span>{source.fetch_interval_minutes} min</span>
+                    </div>
+                    {source.category ? (
+                      <span className="truncate rounded-md bg-slate-100 px-2 py-1">{source.category}</span>
+                    ) : null}
                   </div>
-                  {source.category ? (
-                    <span className="truncate rounded-md bg-slate-100 px-2 py-1">{source.category}</span>
-                  ) : null}
-                </div>
+                </button>
 
                 <div className="mt-3 flex items-center gap-2">
                   <Button
@@ -256,7 +256,7 @@ export function SourceSidebar({
                     Delete
                   </Button>
                 </div>
-              </button>
+              </div>
             )
           })}
         </div>
